@@ -1,0 +1,179 @@
+# 项目级元信息，主要用于统一脚本默认路径和运行约定。
+project:
+  # 项目名称；只用于日志、报告标识，不影响 YOLO 自身训练目录。
+  name: external_inline_pose
+  # 所有验收、复核、日志、manifest 的默认输出根目录。
+  output_root: runs
+  # 固定使用的 Python 解释器；运行命令应显式使用这个 yolo 环境。
+  python: /data1/libo/miniconda3/envs/yolo/bin/python
+
+# 常用模型路径集中管理，避免在多个 profile 中反复查找。
+models:
+  # 训练未检测到 last.pt 时使用的初始权重。
+  initial_weights: /data-ssd/libo/p100/ci2n/models/da_external_port_20260205.pt
+  # 默认 Candidate 模型；验收时评估这个模型。
+  candidate_model: /data-ssd/libo/p100/yolo_utils/train_result/external_port/keypoint_yolo11x_pose_in_line_7k_1000_20260617_2/weights/best.pt
+  # 默认 Champion 模型；为空表示只评估 Candidate，不做新旧模型对比。
+  champion_model: ""
+
+# 常用数据集路径集中管理；实际训练/验收仍以 train 和 acceptance_profiles 中的引用为准。
+datasets:
+  # 主训练数据配置，内部包含 train/val 多路径叠加。
+  train_data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/merge_config_yolo26_0609.yaml
+  # 固定 benchmark 数据集，用于正式基准验收。
+  paper_benchmark_100: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/paper_benchmark_100/data.yaml
+
+# 训练配置；scripts/train_pose.py 默认读取本 section。
+train:
+  # YOLO data.yaml；训练脚本会基于它生成 dataset manifest。
+  data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/merge_config_yolo26_0609.yaml
+  # 初始训练权重；仅在未找到可续训 last.pt 时使用。
+  initial_weights: /data-ssd/libo/p100/ci2n/models/da_external_port_20260205.pt
+  # Ultralytics project 参数；训练结果会写到该项目目录下。
+  project: train_result/external_port
+  # Ultralytics name 参数；同名实验存在时配合 exist_ok/resume 使用。
+  name: keypoint_yolo11x_pose_in_line_7k_1000_20260624
+  # auto 表示优先查找 last.pt 续训，找不到则从 initial_weights 开始。
+  resume: auto
+  # 传给 YOLO(...).train(**args) 的训练参数。
+  args:
+    # 任务类型；当前项目是 YOLO pose，不是 detect。
+    task: pose
+    # Ultralytics 运行模式，训练固定为 train。
+    mode: train
+    # 最大训练轮数；小目标/关键点任务收敛慢，所以设置较长。
+    epochs: 300
+    # 训练 batch size；需要结合显存调整。
+    batch: 32
+    # 输入分辨率；端口目标很小，使用大图保留细节。
+    imgsz: 1536
+    # early stopping patience；小目标慢收敛，耐心值适当加大。
+    patience: 48
+    # 训练使用的 GPU；字符串格式保持与 Ultralytics 参数一致。
+    device: "3,4"
+    # DataLoader worker 数；过高可能造成 CPU/IO 压力。
+    workers: 16
+    # 每个 epoch 后执行验证。
+    val: true
+    # 优化器；当前训练脚本使用 AdamW。
+    optimizer: AdamW
+    # 初始学习率。
+    lr0: 0.001
+    # 最终学习率比例/值，由 Ultralytics 调度器解释。
+    lrf: 0.0001
+    # 动量参数；AdamW 下由 Ultralytics 兼容处理。
+    momentum: 0.937
+    # 权重衰减，控制过拟合。
+    weight_decay: 0.0005
+    # 预热 epoch 数；降低训练初期震荡。
+    warmup_epochs: 7.0
+    # bbox loss 权重；端口框小，保持中等权重。
+    box: 6.5
+    # 分类 loss 权重；单类别任务不需要太高分类权重。
+    cls: 0.4
+    # DFL loss 权重；用于框定位分布回归。
+    dfl: 1.3
+    # pose/keypoint loss 权重；端口识别核心是关键点定位。
+    pose: 16.0
+    # keypoint objectness 权重；提高关键点目标置信度学习。
+    kobj: 1.8
+    # 旋转增强；电路图端口方向固定，关闭旋转。
+    degrees: 0.0
+    # HSV 色相增强；电路图颜色信息弱，低强度即可。
+    hsv_h: 0.01
+    # HSV 饱和度增强；避免过强颜色扰动。
+    hsv_s: 0.25
+    # HSV 明度增强；保留少量亮度鲁棒性。
+    hsv_v: 0.25
+    # 平移增强；小目标平移过大容易移出视野。
+    translate: 0.05
+    # 缩放增强；低强度缩放保留端口细节。
+    scale: 0.25
+    # 水平翻转概率；端口左右结构通常可对称增强。
+    fliplr: 0.5
+    # Mosaic 概率；电路图结构敏感，降低 mosaic 强度。
+    mosaic: 0.4
+    # 随机擦除；端口目标很小，关闭以避免误删目标。
+    erasing: 0.0
+    # 训练最后若干 epoch 关闭 mosaic，学习真实图像分布。
+    close_mosaic: 10
+    # 混合精度训练；节省显存并提升速度。
+    amp: true
+    # 使用预训练权重初始化。
+    pretrained: true
+    # 输出详细训练日志。
+    verbose: true
+    # 保存训练曲线和可视化图。
+    plots: true
+    # 保存模型权重和训练产物。
+    save: true
+    # 允许覆盖/复用同名实验目录。
+    exist_ok: true
+    # 缓存数据以提升训练速度；数据变更后需注意缓存一致性。
+    cache: true
+
+# 统一验收协议；所有 acceptance profile 默认复用这些 tiny-match 参数。
+eval_protocol:
+  # 主指标名称；当前使用自定义 tiny-match F1。
+  metric: tiny_match_f1
+  # 验收任务类型；当前是 pose。
+  task: pose
+  # 推理使用的 GPU；正式验收默认单卡，可按显存调整。
+  device: "0"
+  # 推理输入尺寸，需与训练/业务部署评估保持一致。
+  imgsz: 1536
+  # 推理 batch size；大图 pose 模型默认保守设置为 1。
+  batch: 1
+  # 模型预测置信度阈值。
+  conf: 0.25
+  # YOLO NMS IoU 阈值。
+  nms_iou: 0.45
+  # 推理使用 FP16；CUDA 上通常更快。
+  half: true
+  # 关键点像素距离基础容忍阈值。
+  kp_px: 6.0
+  # 关键点容忍阈值随 GT 框对角线放大的比例。
+  kp_box_ratio: 0.60
+  # 中心点像素距离基础容忍阈值。
+  center_px: 8.0
+  # 中心点容忍阈值随 GT 框最大边放大的比例。
+  center_box_ratio: 0.75
+  # 计算辅助 IoU 时对 tiny bbox 的像素级膨胀。
+  pad_px: 6.0
+  # 中心匹配时要求的最低膨胀框 IoU。
+  min_padded_iou: 0.01
+  # 仅作为参考的严格 bbox IoU 阈值，不是主指标。
+  baseline_iou: 0.50
+  # 是否保存 FP/FN diff 图片、GT label、预测 label。
+  save_diff: true
+  # true 时只保存存在真实 FP 的 diff，false 表示 FP/FN 都保存。
+  save_fp_diff_only: false
+  # 与 save_fp_diff_only 配合，控制重复预测是否也保存为 diff。
+  save_duplicate_fp_diff: false
+
+# 验收 profile；正式版本只保留 full。
+acceptance_profiles:
+  # 完整验收：评估主训练配置和 benchmark，适合正式候选模型验收。
+  full:
+    # run 目录名前缀；最终会追加时间戳。
+    run_id: external_inline_pose_acceptance
+    # 该 profile 的输出根目录。
+    output_root: runs
+    # Candidate 模型路径；默认使用已有 best.pt。
+    candidate_model: /data-ssd/libo/p100/yolo_utils/train_result/external_port/keypoint_yolo11x_pose_in_line_7k_1000_20260617_2/weights/best.pt
+    # Champion 模型路径；为空则跳过新旧模型对比。
+    champion_model: ""
+    # 需要评估的数据集列表。
+    eval_datasets:
+      # 主训练数据配置，用于查看 train/val 上的拟合和泛化情况。
+      - name: merge_config_yolo26_0609
+        # 数据集 data.yaml 路径。
+        data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/merge_config_yolo26_0609.yaml
+        # 对该 data.yaml 的哪些 split 做评估。
+        splits: [train, val]
+      # 固定 benchmark 数据集，用于基准验收。
+      - name: paper_benchmark_100
+        # benchmark data.yaml 路径。
+        data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/paper_benchmark_100/data.yaml
+        # 完整验收中同时看 benchmark 的 train/val。
+        splits: [train, val]
