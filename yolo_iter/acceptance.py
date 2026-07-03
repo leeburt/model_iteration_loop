@@ -38,21 +38,47 @@ def make_run_dir(config: dict[str, Any]) -> Path:
     return run_dir
 
 
+def default_candidate_from_train(config: dict[str, Any]) -> Path | None:
+    """candidate_model 为空时，从 train.project/train.name 推导 best.pt。"""
+    train_cfg = config.get("train") or {}
+    project = train_cfg.get("project")
+    name = train_cfg.get("name")
+    if not project or not name:
+        return None
+    return (Path(project) / str(name) / "weights" / "best.pt").expanduser().resolve()
+
+
+def resolve_model_paths(config: dict[str, Any]) -> dict[str, Path]:
+    """解析 candidate/champion 模型路径；candidate 为空时自动使用当前训练 best.pt。"""
+    resolved: dict[str, Path] = {}
+    candidate = str(config.get("candidate_model") or "").strip()
+    champion = str(config.get("champion_model") or "").strip()
+    if candidate:
+        resolved["candidate"] = Path(candidate).expanduser().resolve()
+    else:
+        default_candidate = default_candidate_from_train(config)
+        if default_candidate is not None:
+            resolved["candidate"] = default_candidate
+            config["candidate_model"] = str(default_candidate)
+            config["candidate_model_source"] = "train_best"
+    if champion:
+        resolved["champion"] = Path(champion).expanduser().resolve()
+    return resolved
+
+
 def model_roles(config: dict[str, Any]) -> list[tuple[str, Path]]:
     """解析配置中的 candidate/champion 模型，校验文件存在。
 
     Returns:
         [("candidate", path), ("champion", path)] 列表，至少包含一个。
     """
-    roles: list[tuple[str, Path]] = []
-    candidate = str(config.get("candidate_model") or "").strip()
-    champion = str(config.get("champion_model") or "").strip()
-    if candidate:
-        roles.append(("candidate", Path(candidate).expanduser().resolve()))
-    if champion:
-        roles.append(("champion", Path(champion).expanduser().resolve()))
+    resolved = resolve_model_paths(config)
+    roles = list(resolved.items())
     if not roles:
-        raise ValueError("At least candidate_model or champion_model must be configured")
+        raise ValueError(
+            "No model configured. Set candidate_model/champion_model, or provide train.project and train.name "
+            "so candidate can default to train.project/train.name/weights/best.pt."
+        )
     for role, path in roles:
         if not path.exists():
             raise FileNotFoundError(f"{role}_model does not exist: {path}")

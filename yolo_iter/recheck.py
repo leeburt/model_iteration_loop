@@ -13,6 +13,7 @@ from typing import Any
 
 from .config import acceptance_config_from_project, load_yaml
 from .manifest import build_dataset_manifest, write_json
+from .acceptance import resolve_model_paths
 from .pose_tiny_match import evaluate_split, tiny_config_from_dict
 
 
@@ -57,11 +58,7 @@ def run_review_recheck(
         write_json(review_dir / "manifests" / f"dataset_manifest_{manifest['dataset_name']}.json", manifest)
 
     tiny_cfg = tiny_config_from_dict(cfg.get("eval", {}))
-    roles = []
-    if str(cfg.get("candidate_model") or "").strip():
-        roles.append("candidate")
-    if str(cfg.get("champion_model") or "").strip():
-        roles.append("champion")
+    roles = list(resolve_model_paths(cfg).keys())
     if not roles:
         # Review can still re-evaluate existing candidate cache even if current config no longer carries model path.
         if (run_path / "cache" / "candidate").is_dir():
