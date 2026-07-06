@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from yolo_iter.config import acceptance_config_from_project
+from yolo_iter.config import acceptance_config_from_project, model_pk_config_from_project
 
 
 class AcceptanceConfigTest(unittest.TestCase):
@@ -47,6 +47,29 @@ class AcceptanceConfigTest(unittest.TestCase):
 
         self.assertEqual(cfg["candidate_model"], "/models/profile_candidate.pt")
         self.assertEqual(cfg["champion_model"], "/models/profile_champion.pt")
+
+    def test_model_pk_profile_inherits_top_level_models_and_eval_protocol(self) -> None:
+        cfg = model_pk_config_from_project(
+            {
+                "models": {
+                    "candidate_model": "/models/candidate.pt",
+                    "champion_model": "/models/champion.pt",
+                },
+                "eval_protocol": {"imgsz": 1536, "save_diff": True},
+                "model_pk_profiles": {
+                    "default": {
+                        "candidate_model": "",
+                        "champion_model": "",
+                        "eval_datasets": [{"name": "tiny", "data": "/data.yaml", "splits": ["val"]}],
+                    }
+                },
+            },
+            profile="default",
+        )
+
+        self.assertEqual(cfg["candidate_model"], "/models/candidate.pt")
+        self.assertEqual(cfg["champion_model"], "/models/champion.pt")
+        self.assertEqual(cfg["eval"]["imgsz"], 1536)
 
 
 if __name__ == "__main__":

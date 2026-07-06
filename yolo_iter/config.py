@@ -74,3 +74,22 @@ def acceptance_config_from_project(project_config: dict[str, Any], profile: str 
     if "train" in project_config:
         cfg["train"] = dict(project_config["train"])
     return cfg
+
+
+def model_pk_config_from_project(project_config: dict[str, Any], profile: str = "default") -> dict[str, Any]:
+    """从 project.yaml 中提取 model PK profile，合并顶层 models 和 eval_protocol。"""
+    if "model_pk_profiles" not in project_config:
+        return project_config
+    profiles = project_config.get("model_pk_profiles") or {}
+    if profile not in profiles:
+        available = ", ".join(sorted(profiles))
+        raise KeyError(f"Unknown model PK profile '{profile}'. Available profiles: {available}")
+    cfg = dict(profiles[profile])
+    models = project_config.get("models") or {}
+    for key in ("candidate_model", "champion_model"):
+        if not str(cfg.get(key) or "").strip() and str(models.get(key) or "").strip():
+            cfg[key] = models[key]
+    cfg["eval"] = dict(project_config.get("eval_protocol") or {})
+    if "train" in project_config:
+        cfg["train"] = dict(project_config["train"])
+    return cfg

@@ -469,6 +469,7 @@ def save_visualization_sample(
     copy_label_or_empty(gt_label, out_dir / "labels_gt" / gt_label.name)
     copy_label_or_empty(candidate_label, out_dir / "labels_candidate" / candidate_label.name)
     if champion_label is not None:
+        (out_dir / "labels_champion").mkdir(parents=True, exist_ok=True)
         copy_label_or_empty(champion_label, out_dir / "labels_champion" / champion_label.name)
     save_compare_visual(
         out_dir / "compare" / img_path.name,

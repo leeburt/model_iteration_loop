@@ -175,3 +175,24 @@ acceptance_profiles:
         data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/paper_benchmark_100/data.yaml
         # 对该 data.yaml 的哪些 split 做评估。
         splits: [val]
+
+# 模型 PK profile：以 Champion 预测作为 pseudo-GT，对比 Candidate 和 Champion 的差异。
+model_pk_profiles:
+  # 默认模型 PK：用于快速查看当前训练 best.pt 相对 Champion 的新增 FP/FN。
+  default:
+    # run 目录名前缀；最终会追加时间戳。
+    run_id: merge_config_yolo26_0609_model_pk
+    # 该 profile 的输出根目录。
+    output_root: runs
+    # Candidate 模型路径；为空时自动使用 train.project/train.name/weights/best.pt。
+    candidate_model: ""
+    # Champion 模型路径；为空时继承顶层 models.champion_model。
+    champion_model: ""
+    # 需要做模型 PK 的数据集列表。
+    eval_datasets:
+      # 固定 benchmark 数据集；当前 data.yaml 只有 val split，避免配置 train 报空数据。
+      - name: paper_benchmark_100
+        # benchmark data.yaml 路径。
+        data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/paper_benchmark_100/data.yaml
+        # 模型 PK 对该 data.yaml 的哪些 split 做推理和对比。
+        splits: [val]
