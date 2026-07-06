@@ -6,8 +6,8 @@
 3. 未匹配的 Pred 若与已匹配 GT 存在候选匹配 → 标记为 duplicate_fp，否则 → real_fp
 
 匹配完成后支持：
-- 逐图 FP/FN 差异可视化（save_diff_visual）
-- FP/FN 样本拷贝（copy_diff，含原图、GT/Pred 标签、JSON 元数据）
+- FP/FN 样本可视化输出到 visualizations/<dataset>/<split>/<category>
+- Candidate 与 Champion 逐图对比分类
 - 逐图及汇总指标输出（CSV + JSON）
 """
 
@@ -39,7 +39,7 @@ class TinyMatchConfig:
     - min_padded_iou: 中心匹配时要求的最低膨胀 IoU
     - baseline_iou: 作为参考的严格 bbox IoU 阈值（非主匹配策略）
     - device / imgsz / batch / conf / nms_iou / half: 推理参数
-    - save_diff / save_fp_diff_only / save_duplicate_fp_diff: diff 输出控制
+    - save_diff / save_fp_diff_only / save_duplicate_fp_diff: 可视化输出控制
     """
 
     kp_px: float = 6.0
@@ -58,6 +58,7 @@ class TinyMatchConfig:
     save_diff: bool = True
     save_fp_diff_only: bool = False
     save_duplicate_fp_diff: bool = False
+    show_progress: bool = True
 
 
 @dataclass
@@ -246,7 +247,32 @@ def precision_recall(tp: int, fp: int, fn: int) -> dict[str, float]:
     return {"precision": precision, "recall": recall, "f1": f1}
 
 
-def predict_to_labels(model_path: Path, images: list[Path], pred_dir: Path, cfg: TinyMatchConfig) -> None:
+def maybe_progress(
+    iterable: Iterable[Any],
+    *,
+    enabled: bool,
+    desc: str,
+    total: int | None = None,
+    tqdm_factory=None,
+) -> Iterable[Any]:
+    """Wrap an iterable in tqdm when enabled and available."""
+    if not enabled:
+        return iterable
+    if tqdm_factory is None:
+        try:
+            from tqdm.auto import tqdm as tqdm_factory
+        except ImportError:
+            return iterable
+    return tqdm_factory(iterable, desc=desc, total=total, unit="img", dynamic_ncols=True)
+
+
+def predict_to_labels(
+    model_path: Path,
+    images: list[Path],
+    pred_dir: Path,
+    cfg: TinyMatchConfig,
+    progress_desc: str | None = None,
+) -> None:
     """用 YOLO 模型对图片列表执行推理，将预测结果写为 YOLO 标签文件到 pred_dir。
 
     会先清空 pred_dir 再写入。
@@ -270,7 +296,12 @@ def predict_to_labels(model_path: Path, images: list[Path], pred_dir: Path, cfg:
         stream=True,
         verbose=False,
     )
-    for result in results:
+    for result in maybe_progress(
+        results,
+        enabled=cfg.show_progress,
+        desc=progress_desc or f"{model_path.stem} predict",
+        total=len(images),
+    ):
         img_path = Path(result.path)
         items = result_to_items(result)
         img_w, img_h = image_size(img_path)
@@ -291,81 +322,240 @@ def draw_keypoint(draw: ImageDraw.ImageDraw, item: PoseItem, color: str, radius:
     draw.line([x, y - radius * 2, x, y + radius * 2], fill=color, width=2)
 
 
-def save_diff_visual(
-    out_dir: Path,
-    img_path: Path,
+def load_font(size: int = 18):
+    """加载可视化标题字体。"""
+    try:
+        return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
+    except OSError:
+        return ImageFont.load_default()
+
+
+def draw_title(img: Image.Image, title: str) -> Image.Image:
+    """在图像顶部绘制标题栏，返回新图。"""
+    font = load_font(18)
+    title_h = 34
+    out = Image.new("RGB", (img.width, img.height + title_h), "white")
+    out.paste(img, (0, title_h))
+    draw = ImageDraw.Draw(out)
+    draw.rectangle([0, 0, out.width, title_h], fill="white")
+    draw.text((10, 8), title, fill="black", font=font)
+    return out
+
+
+def draw_items(draw: ImageDraw.ImageDraw, items: list[PoseItem], color: str, label: str | None = None) -> None:
+    """绘制一组 pose items。"""
+    font = load_font(14)
+    for item in items:
+        draw_box(draw, item, color, width=3, pad=2)
+        draw_keypoint(draw, item, color, radius=5)
+        if label is not None:
+            text = label
+            if item.conf != 1.0:
+                text = f"{label} {item.conf:.2f}"
+            draw.text((item.x1, max(0, item.y1 - 18)), text, fill=color, font=font)
+
+
+def draw_prediction_item(draw: ImageDraw.ImageDraw, item: PoseItem, color: str) -> None:
+    """绘制预测结果，只显示置信度分数。"""
+    font = load_font(14)
+    draw_box(draw, item, color, width=3, pad=2)
+    draw_keypoint(draw, item, color, radius=5)
+    draw.text((item.x1, max(0, item.y1 - 18)), f"{item.conf:.2f}", fill=color, font=font)
+
+
+def classify_items_for_visualization(
     gt_items: list[PoseItem],
     pred_items: list[PoseItem],
-    matches: list[Match],
-    unmatched_gt: list[int],
-    duplicate_pred: list[int],
-    real_fp_pred: list[int],
-) -> None:
-    """生成 FP/FN 可视化图。
+    cfg: TinyMatchConfig,
+) -> dict[str, set[int]]:
+    """将单图预测划分为 TP/FP/FN 索引集合，供可视化着色。"""
+    matches = tiny_match(gt_items, pred_items, cfg)
+    tp_pred_indices = {m.pred_idx for m in matches}
+    matched_gt_indices = {m.gt_idx for m in matches}
+    fp_pred_indices = {i for i in range(len(pred_items)) if i not in tp_pred_indices}
+    fn_gt_indices = {i for i in range(len(gt_items)) if i not in matched_gt_indices}
+    return {
+        "tp_pred_indices": tp_pred_indices,
+        "fp_pred_indices": fp_pred_indices,
+        "fn_gt_indices": fn_gt_indices,
+    }
 
-    颜色约定：TP 绿色，FN 红色，duplicate FP 橙色，real FP 蓝色。
-    """
-    vis_dir = out_dir / "vis"
-    vis_dir.mkdir(parents=True, exist_ok=True)
+
+def render_overlay_panel(img_path: Path, title: str, items: list[PoseItem], color: str, label: str | None = None) -> Image.Image:
+    """渲染单栏图：原图 + 一组标注/预测。"""
     img = Image.open(img_path).convert("RGB")
     draw = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
-    except OSError:
-        font = ImageFont.load_default()
-    for match in matches:
-        draw_box(draw, gt_items[match.gt_idx], "lime", width=2, pad=1)
-        draw_keypoint(draw, pred_items[match.pred_idx], "lime", radius=4)
-    for idx in unmatched_gt:
-        gt = gt_items[idx]
-        draw_box(draw, gt, "red", width=4, pad=4)
-        draw_keypoint(draw, gt, "red", radius=6)
-        draw.text((gt.x1, max(0, gt.y1 - 18)), "FN", fill="red", font=font)
-    for idx in duplicate_pred:
-        pred = pred_items[idx]
-        draw_box(draw, pred, "orange", width=3, pad=3)
-        draw_keypoint(draw, pred, "orange", radius=5)
-        draw.text((pred.x1, pred.y2 + 20), f"DUP {pred.conf:.2f}", fill="orange", font=font)
-    for idx in real_fp_pred:
-        pred = pred_items[idx]
-        draw_box(draw, pred, "dodgerblue", width=4, pad=4)
-        draw_keypoint(draw, pred, "cyan", radius=6)
-        draw.text((pred.x1, pred.y2 + 20), f"FP {pred.conf:.2f}", fill="dodgerblue", font=font)
-    img.save(vis_dir / img_path.name)
+    draw_items(draw, items, color, label=label)
+    return draw_title(img, title)
 
 
-def copy_diff(
-    out_dir: Path,
+def render_prediction_panel(
+    img_path: Path,
+    title: str,
+    gt_items: list[PoseItem],
+    pred_items: list[PoseItem],
+    cfg: TinyMatchConfig,
+) -> Image.Image:
+    """渲染模型预测栏：TP 绿、FP 黄、FN 红。"""
+    img = Image.open(img_path).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    classified = classify_items_for_visualization(gt_items, pred_items, cfg)
+    for idx in classified["tp_pred_indices"]:
+        draw_prediction_item(draw, pred_items[idx], "lime")
+    for idx in classified["fp_pred_indices"]:
+        draw_prediction_item(draw, pred_items[idx], "yellow")
+    for idx in classified["fn_gt_indices"]:
+        draw_box(draw, gt_items[idx], "red", width=4, pad=4)
+        draw_keypoint(draw, gt_items[idx], "red", radius=6)
+    return draw_title(img, title)
+
+
+def save_compare_visual(
+    out_path: Path,
+    img_path: Path,
+    gt_items: list[PoseItem],
+    candidate_items: list[PoseItem],
+    champion_items: list[PoseItem] | None = None,
+    cfg: TinyMatchConfig | None = None,
+) -> None:
+    """生成四栏对比图：原图 / GT / Champion / Candidate。"""
+    cfg = cfg or TinyMatchConfig()
+    original = draw_title(Image.open(img_path).convert("RGB"), "original")
+    gt_panel = render_overlay_panel(img_path, "gt", gt_items, "lime", label="GT")
+    panels = [original, gt_panel]
+    if champion_items is not None:
+        panels.append(render_prediction_panel(img_path, "champion", gt_items, champion_items, cfg))
+    panels.append(render_prediction_panel(img_path, "candidate", gt_items, candidate_items, cfg))
+
+    width = sum(panel.width for panel in panels)
+    height = max(panel.height for panel in panels)
+    out = Image.new("RGB", (width, height), "white")
+    x = 0
+    for panel in panels:
+        out.paste(panel, (x, 0))
+        x += panel.width
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out.save(out_path)
+
+
+def copy_label_or_empty(src: Path | None, dst: Path) -> None:
+    """复制标签文件；不存在时写空标签。"""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if src is not None and src.exists():
+        shutil.copy2(src, dst)
+    else:
+        dst.write_text("", encoding="utf-8")
+
+
+def save_visualization_sample(
+    output_dir: Path,
+    dataset_name: str,
+    split: str,
+    category: str,
     img_path: Path,
     gt_label: Path,
-    pred_label: Path,
-    unmatched_gt: Iterable[int],
-    unmatched_pred: Iterable[int],
-    duplicate_pred: Iterable[int],
-    real_fp_pred: Iterable[int],
-    duplicate_info: dict[int, dict[str, Any]],
+    candidate_label: Path,
+    candidate_items: list[PoseItem],
+    gt_items: list[PoseItem],
+    champion_label: Path | None = None,
+    champion_items: list[PoseItem] | None = None,
+    cfg: TinyMatchConfig | None = None,
 ) -> None:
-    """拷贝 FP/FN 样本的原图、GT 标签、预测标签及 JSON 元数据到 diff 目录。"""
-    for sub in ("images", "labels_gt", "labels_pred"):
+    """按 visualizations/<dataset>/<split>/<category> 保存样本。"""
+    out_dir = output_dir / "visualizations" / dataset_name / split / category
+    for sub in ("images", "labels_gt", "labels_candidate", "compare"):
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
     shutil.copy2(img_path, out_dir / "images" / img_path.name)
-    if gt_label.exists():
-        shutil.copy2(gt_label, out_dir / "labels_gt" / gt_label.name)
-    else:
-        (out_dir / "labels_gt" / gt_label.name).write_text("", encoding="utf-8")
-    if pred_label.exists():
-        shutil.copy2(pred_label, out_dir / "labels_pred" / pred_label.name)
-    else:
-        (out_dir / "labels_pred" / pred_label.name).write_text("", encoding="utf-8")
-    meta = {
-        "image": str(img_path),
-        "unmatched_gt": list(unmatched_gt),
-        "unmatched_pred": list(unmatched_pred),
-        "duplicate_pred": list(duplicate_pred),
-        "real_fp_pred": list(real_fp_pred),
-        "duplicate_info": {str(k): v for k, v in duplicate_info.items()},
-    }
-    (out_dir / f"{img_path.stem}.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    copy_label_or_empty(gt_label, out_dir / "labels_gt" / gt_label.name)
+    copy_label_or_empty(candidate_label, out_dir / "labels_candidate" / candidate_label.name)
+    if champion_label is not None:
+        copy_label_or_empty(champion_label, out_dir / "labels_champion" / champion_label.name)
+    save_compare_visual(
+        out_dir / "compare" / img_path.name,
+        img_path,
+        gt_items=gt_items,
+        candidate_items=candidate_items,
+        champion_items=champion_items,
+        cfg=cfg,
+    )
+
+
+def build_visualization_plan(
+    candidate_rows: list[dict[str, Any]],
+    champion_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, set[str]]:
+    """根据逐图结果生成可视化分类计划。"""
+    champion_by_image = {str(row["image"]): row for row in (champion_rows or [])}
+    plan: dict[str, set[str]] = {}
+    for row in candidate_rows:
+        image = str(row["image"])
+        categories: set[str] = set()
+        cand_fp = int(row.get("fp", 0))
+        cand_fn = int(row.get("fn", 0))
+        if cand_fp > 0:
+            categories.add("fp")
+        if cand_fn > 0:
+            categories.add("fn")
+
+        champion = champion_by_image.get(image)
+        if champion is not None:
+            champ_fp = int(champion.get("fp", 0))
+            champ_fn = int(champion.get("fn", 0))
+            if cand_fp > 0 and champ_fp == 0:
+                categories.add("candidate_new_fp")
+            if cand_fn > 0 and champ_fn == 0:
+                categories.add("candidate_new_fn")
+            if cand_fp + cand_fn < champ_fp + champ_fn:
+                categories.add("candidate_improved")
+
+        if categories:
+            plan[image] = categories
+    return plan
+
+
+def label_for_row(row: dict[str, Any], key: str) -> Path:
+    """从逐图结果中读取标签路径。"""
+    return Path(str(row[key]))
+
+
+def generate_comparison_visualizations(
+    output_dir: Path,
+    dataset_name: str,
+    split: str,
+    candidate_rows: list[dict[str, Any]],
+    champion_rows: list[dict[str, Any]] | None = None,
+    cfg: TinyMatchConfig | None = None,
+) -> None:
+    """基于 Candidate/Champion 逐图结果生成差异可视化。"""
+    plan = build_visualization_plan(candidate_rows, champion_rows)
+    candidate_by_image = {str(row["image"]): row for row in candidate_rows}
+    champion_by_image = {str(row["image"]): row for row in (champion_rows or [])}
+    for image, categories in plan.items():
+        cand_row = candidate_by_image[image]
+        champ_row = champion_by_image.get(image)
+        img_path = Path(image)
+        gt_label = label_for_row(cand_row, "gt_label")
+        candidate_label = label_for_row(cand_row, "pred_label")
+        w, h = image_size(img_path)
+        gt_items = read_pose_txt(gt_label, w, h, has_conf=False)
+        candidate_items = read_pose_txt(candidate_label, w, h, has_conf=True)
+        champion_label = label_for_row(champ_row, "pred_label") if champ_row is not None else None
+        champion_items = read_pose_txt(champion_label, w, h, has_conf=True) if champion_label is not None else None
+        for category in categories:
+            save_visualization_sample(
+                output_dir=output_dir,
+                dataset_name=dataset_name,
+                split=split,
+                category=category,
+                img_path=img_path,
+                gt_label=gt_label,
+                candidate_label=candidate_label,
+                candidate_items=candidate_items,
+                gt_items=gt_items,
+                champion_label=champion_label,
+                champion_items=champion_items,
+                cfg=cfg,
+            )
 
 
 def evaluate_split(
@@ -381,7 +571,7 @@ def evaluate_split(
     """对单个数据集的单个 split 执行完整评估。
 
     流程：加载数据 → 推理（或复用缓存预测）→ 逐图匹配 →
-    分类 FP/FN → 输出指标、diff 样本、CSV/JSON 结果。
+    分类 FP/FN → 输出指标、CSV/JSON 结果。
 
     Args:
         data_path: data.yaml 路径。
@@ -405,12 +595,20 @@ def evaluate_split(
     for image_dir, label_dir in pairs:
         for img_path in collect_images(image_dir):
             image_label_pairs.append((img_path, label_dir / f"{img_path.stem}.txt", image_dir))
+    if not image_label_pairs:
+        raise ValueError(f"No images found for dataset={dataset_name} split={split} data={data_path}")
 
     pred_root = output_dir / "cache" / model_role / dataset_name / split / "_pred_labels"
     if pred_label_dirs is None:
         if model_path is None:
             raise ValueError("model_path or pred_label_dirs is required")
-        predict_to_labels(model_path, [p[0] for p in image_label_pairs], pred_root, cfg)
+        predict_to_labels(
+            model_path,
+            [p[0] for p in image_label_pairs],
+            pred_root,
+            cfg,
+            progress_desc=f"{model_role} {dataset_name} {split} predict",
+        )
         pred_label_dirs = [pred_root]
     else:
         pred_label_dirs = [Path(p) for p in pred_label_dirs]
@@ -427,9 +625,13 @@ def evaluate_split(
         "baseline_tp": 0,
     }
     rows: list[dict[str, Any]] = []
-    diff_root = output_dir / "diff" / model_role / dataset_name / split
 
-    for img_path, gt_label, _image_dir in image_label_pairs:
+    for img_path, gt_label, _image_dir in maybe_progress(
+        image_label_pairs,
+        enabled=cfg.show_progress,
+        desc=f"{model_role} {dataset_name} {split} match",
+        total=len(image_label_pairs),
+    ):
         w, h = image_size(img_path)
         gt_items = read_pose_txt(gt_label, w, h, has_conf=False)
         pred_label = None
@@ -465,19 +667,14 @@ def evaluate_split(
         totals["real_fp"] += len(real_fp_pred)
         totals["baseline_tp"] += baseline_tp
 
-        should_save_diff = cfg.save_diff and (fp or fn)
-        if should_save_diff and cfg.save_fp_diff_only:
-            should_save_diff = len(real_fp_pred) > 0 or (cfg.save_duplicate_fp_diff and len(duplicate_pred) > 0)
-        if should_save_diff:
-            copy_diff(diff_root, img_path, gt_label, pred_label, unmatched_gt, unmatched_pred, duplicate_pred, real_fp_pred, duplicate_info)
-            save_diff_visual(diff_root, img_path, gt_items, pred_items, matches, unmatched_gt, duplicate_pred, real_fp_pred)
-
         rows.append(
             {
                 "dataset": dataset_name,
                 "split": split,
                 "model_role": model_role,
                 "image": str(img_path),
+                "gt_label": str(gt_label),
+                "pred_label": str(pred_label),
                 "gt": len(gt_items),
                 "pred": len(pred_items),
                 "tp": tp,

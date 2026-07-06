@@ -144,11 +144,11 @@ eval_protocol:
   min_padded_iou: 0.01
   # 仅作为参考的严格 bbox IoU 阈值，不是主指标。
   baseline_iou: 0.50
-  # 是否保存 FP/FN diff 图片、GT label、预测 label。
+  # 是否生成 visualizations/ 可视化样本；兼容旧字段名 save_diff。
   save_diff: true
-  # true 时只保存存在真实 FP 的 diff，false 表示 FP/FN 都保存。
+  # 兼容旧 diff 配置；新 visualizations 流程暂不使用。
   save_fp_diff_only: false
-  # 与 save_fp_diff_only 配合，控制重复预测是否也保存为 diff。
+  # 兼容旧 diff 配置；新 visualizations 流程暂不使用。
   save_duplicate_fp_diff: false
 
 # 验收 profile；正式版本只保留 full。

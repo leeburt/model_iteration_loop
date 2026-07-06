@@ -66,6 +66,10 @@ def acceptance_config_from_project(project_config: dict[str, Any], profile: str 
         available = ", ".join(sorted(profiles))
         raise KeyError(f"Unknown acceptance profile '{profile}'. Available profiles: {available}")
     cfg = dict(profiles[profile])
+    models = project_config.get("models") or {}
+    for key in ("candidate_model", "champion_model"):
+        if not str(cfg.get(key) or "").strip() and str(models.get(key) or "").strip():
+            cfg[key] = models[key]
     cfg["eval"] = dict(project_config.get("eval_protocol") or {})
     if "train" in project_config:
         cfg["train"] = dict(project_config["train"])

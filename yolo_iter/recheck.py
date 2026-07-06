@@ -13,7 +13,7 @@ from typing import Any
 
 from .config import acceptance_config_from_project, load_yaml
 from .manifest import build_dataset_manifest, write_json
-from .acceptance import resolve_model_paths
+from .acceptance import resolve_model_paths, write_comparison_visualizations
 from .pose_tiny_match import evaluate_split, tiny_config_from_dict
 
 
@@ -109,6 +109,7 @@ def run_review_recheck(
                 "f1": metrics["f1"],
             }
         )
+    write_comparison_visualizations(review_dir, results, save_visualizations=bool(tiny_cfg.save_diff), cfg=tiny_cfg)
     write_json(review_dir / "metrics" / "overall_summary.json", rows)
     (review_dir / "metrics").mkdir(parents=True, exist_ok=True)
     with (review_dir / "metrics" / "overall_summary.csv").open("w", newline="", encoding="utf-8") as f:

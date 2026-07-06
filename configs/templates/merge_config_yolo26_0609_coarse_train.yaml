@@ -1,0 +1,96 @@
+# 粗调模板：从基础权重重新开始一个较完整的训练实验。
+project:
+  name: external_inline_pose_merge_config_yolo26_0609_coarse
+  output_root: runs
+  python: /data1/libo/miniconda3/envs/yolo/bin/python
+
+models:
+  # 粗调起点：基础模型或上一阶段通用端口模型。
+  initial_weights: /data-ssd/libo/p100/ci2n/models/da_external_port_20260205.pt
+  # 为空时验收自动使用 train.project/train.name/weights/best.pt。
+  candidate_model: ""
+  champion_model: ""
+
+datasets:
+  main_data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/merge_config_yolo26_0609.yaml
+
+train:
+  data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/merge_config_yolo26_0609.yaml
+  # 粗调从基础权重启动，适合数据、类别或分布变化较大时使用。
+  initial_weights: /data-ssd/libo/p100/ci2n/models/da_external_port_20260205.pt
+  project: /data-ssd/libo/p100/atuo_iter/train_result/external_port
+  name: keypoint_yolo11x_pose_merge_config_yolo26_0609_coarse
+  resume: false
+  args:
+    task: pose
+    mode: train
+    # 粗调轮数较长，让模型充分适应当前数据集。
+    epochs: 300
+    batch: 32
+    imgsz: 1536
+    patience: 50
+    device: "5"
+    workers: 16
+    val: true
+    optimizer: AdamW
+    # 粗调学习率：比精调大，用于从基础模型适配当前数据。
+    lr0: 0.001
+    # 最终学习率约为 lr0 * lrf = 1e-5。
+    lrf: 0.01
+    momentum: 0.937
+    weight_decay: 0.0005
+    warmup_epochs: 3.0
+    box: 7.5
+    cls: 0.5
+    dfl: 1.5
+    pose: 16.0
+    kobj: 2.0
+    # 粗调阶段保留适度增强，提升对数据分布变化的鲁棒性。
+    degrees: 0.0
+    hsv_h: 0.010
+    hsv_s: 0.20
+    hsv_v: 0.20
+    translate: 0.05
+    scale: 0.30
+    fliplr: 0.5
+    mosaic: 0.2
+    erasing: 0.0
+    close_mosaic: 20
+    amp: true
+    pretrained: true
+    verbose: true
+    plots: true
+    save: true
+    exist_ok: true
+    cache: true
+
+eval_protocol:
+  metric: tiny_match_f1
+  task: pose
+  device: "0"
+  imgsz: 1536
+  batch: 1
+  conf: 0.25
+  nms_iou: 0.45
+  half: true
+  kp_px: 6.0
+  kp_box_ratio: 0.60
+  center_px: 8.0
+  center_box_ratio: 0.75
+  pad_px: 6.0
+  min_padded_iou: 0.01
+  baseline_iou: 0.50
+  save_diff: true
+  save_fp_diff_only: false
+  save_duplicate_fp_diff: false
+
+acceptance_profiles:
+  full:
+    run_id: merge_config_yolo26_0609_coarse_acceptance
+    output_root: runs
+    candidate_model: ""
+    champion_model: ""
+    eval_datasets:
+      - name: merge_config_yolo26_0609
+        data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/merge_config_yolo26_0609.yaml
+        splits: [train, val]

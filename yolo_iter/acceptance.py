@@ -19,7 +19,7 @@ from typing import Any
 from .config import acceptance_config_from_project, load_yaml
 from .logging_utils import add_file_handler
 from .manifest import build_dataset_manifest, file_sha256, write_json
-from .pose_tiny_match import evaluate_split, tiny_config_from_dict
+from .pose_tiny_match import evaluate_split, generate_comparison_visualizations, tiny_config_from_dict
 
 
 def timestamp_run_id(prefix: str) -> str:
@@ -165,6 +165,30 @@ def write_overall_summary(run_dir: Path, results: list[dict[str, Any]]) -> None:
             writer.writerow(row)
 
 
+def write_comparison_visualizations(run_dir: Path, results: list[dict[str, Any]], save_visualizations: bool, cfg=None) -> None:
+    """根据 candidate/champion 逐图结果生成 visualizations 目录。"""
+    if not save_visualizations:
+        return
+    grouped: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = {}
+    for item in results:
+        summary = item["summary"]
+        key = (summary["dataset"], summary["split"])
+        grouped.setdefault(key, {})[summary["model_role"]] = item["rows"]
+
+    for (dataset_name, split), by_role in grouped.items():
+        candidate_rows = by_role.get("candidate")
+        if not candidate_rows:
+            continue
+        generate_comparison_visualizations(
+            output_dir=run_dir,
+            dataset_name=dataset_name,
+            split=split,
+            candidate_rows=candidate_rows,
+            champion_rows=by_role.get("champion"),
+            cfg=cfg,
+        )
+
+
 def run_acceptance(config_path: str | Path, profile: str = "full", logger=None) -> Path:
     """执行完整验收流程，返回 run_dir。
 
@@ -221,5 +245,6 @@ def run_acceptance(config_path: str | Path, profile: str = "full", logger=None) 
                 if logger:
                     logger.info("Result %s/%s/%s: %s", role, dataset_name, split, result["summary"]["metrics"])
 
+    write_comparison_visualizations(run_dir, results, save_visualizations=bool(tiny_cfg.save_diff), cfg=tiny_cfg)
     write_overall_summary(run_dir, results)
     return run_dir

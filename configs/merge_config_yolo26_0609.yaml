@@ -10,11 +10,11 @@ project:
 # 模型路径集中管理。
 models:
   # 训练未检测到 last.pt 时使用的初始权重。
-  initial_weights: /data-ssd/libo/p100/ci2n/models/da_external_port_20260205.pt
+  initial_weights: /data-ssd/libo/p100/atuo_iter/train_result/external_port/keypoint_yolo11x_pose_merge_config_yolo26_0609/weights/best.pt
   # 默认 Candidate 模型；为空时验收自动使用 train.project/train.name/weights/best.pt。
   candidate_model: ""
   # Champion 模型；为空表示只评估 Candidate，不做新旧模型对比。
-  champion_model: ""
+  champion_model: "/data-ssd/libo/p100/yolo_utils/runs/pose/train_result/external_port/keypoint_yolo11x_pose_in_line_7k_1000_20260624/weights/best.pt"
 
 # 本配置唯一使用的数据集。
 datasets:
@@ -26,27 +26,27 @@ train:
   # YOLO data.yaml；训练脚本会基于它生成 dataset manifest。
   data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/merge_config_yolo26_0609.yaml
   # 初始训练权重；仅在未找到可续训 last.pt 时使用。
-  initial_weights: /data-ssd/libo/p100/ci2n/models/da_external_port_20260205.pt
+  initial_weights: /data-ssd/libo/p100/atuo_iter/train_result/external_port/keypoint_yolo11x_pose_merge_config_yolo26_0609/weights/best.pt
   # Ultralytics project 参数；训练结果会写到该项目目录下。
   project: /data-ssd/libo/p100/atuo_iter/train_result/external_port
   # Ultralytics name 参数；同名实验存在时配合 exist_ok/resume 使用。
-  name: keypoint_yolo11x_pose_merge_config_yolo26_0609
-  # auto 表示优先查找 last.pt 续训，找不到则从 initial_weights 开始。
-  resume: auto
+  name: keypoint_yolo11x_pose_merge_config_yolo26_0609_test_continus
+  # 精调时建议从 initial_weights 重新启动一个新实验，不复用旧优化器状态。
+  resume: false
   # 传给 YOLO(...).train(**args) 的训练参数。
   args:
     # 任务类型；当前项目是 YOLO pose，不是 detect。
     task: pose
     # Ultralytics 运行模式，训练固定为 train。
     mode: train
-    # 最大训练轮数；小目标/关键点任务收敛慢，所以设置较长。
-    epochs: 300
+    # 精调轮数；从已有 best.pt 出发，不需要再跑完整 300 epoch。
+    epochs: 80
     # 训练 batch size；需要结合显存调整。
     batch: 32
     # 输入分辨率；端口目标很小，使用大图保留细节。
     imgsz: 1536
-    # early stopping patience；小目标慢收敛，耐心值适当加大。
-    patience: 30
+    # 精调 early stopping；连续 20 轮没有提升就停止。
+    patience: 20
     # 训练使用的 GPU；字符串格式保持与 Ultralytics 参数一致。
     device: "5"
     # DataLoader worker 数；过高可能造成 CPU/IO 压力。
@@ -55,16 +55,16 @@ train:
     val: true
     # 优化器；当前训练脚本使用 AdamW。
     optimizer: AdamW
-    # 初始学习率。
-    lr0: 0.001
-    # 最终学习率比例/值，由 Ultralytics 调度器解释。
-    lrf: 0.0001
+    # 精调初始学习率；从已有 best.pt 继续优化时要低于从头训练。
+    lr0: 0.0001
+    # 最终学习率比例；最终学习率约为 lr0 * lrf = 1e-6。
+    lrf: 0.01
     # 动量参数；AdamW 下由 Ultralytics 兼容处理。
     momentum: 0.937
     # 权重衰减，控制过拟合。
     weight_decay: 0.0005
-    # 预热 epoch 数；降低训练初期震荡。
-    warmup_epochs: 7.0
+    # 精调预热 epoch 数；避免长 warmup 再次大幅扰动已有权重。
+    warmup_epochs: 1.0
     # bbox loss 权重；端口框小，保持中等权重。
     box: 6.5
     # 分类 loss 权重；单类别任务不需要太高分类权重。
@@ -77,24 +77,24 @@ train:
     kobj: 1.8
     # 旋转增强；电路图端口方向固定，关闭旋转。
     degrees: 0.0
-    # HSV 色相增强；电路图颜色信息弱，低强度即可。
-    hsv_h: 0.01
-    # HSV 饱和度增强；避免过强颜色扰动。
-    hsv_s: 0.25
-    # HSV 明度增强；保留少量亮度鲁棒性。
-    hsv_v: 0.25
-    # 平移增强；小目标平移过大容易移出视野。
-    translate: 0.05
-    # 缩放增强；低强度缩放保留端口细节。
-    scale: 0.25
+    # HSV 色相增强；精调阶段降低颜色扰动。
+    hsv_h: 0.005
+    # HSV 饱和度增强；精调阶段降低颜色扰动。
+    hsv_s: 0.10
+    # HSV 明度增强；精调阶段保留少量亮度鲁棒性。
+    hsv_v: 0.10
+    # 平移增强；精调阶段降低几何扰动。
+    translate: 0.02
+    # 缩放增强；精调阶段降低几何扰动。
+    scale: 0.10
     # 水平翻转概率；端口左右结构通常可对称增强。
     fliplr: 0.5
-    # Mosaic 概率；电路图结构敏感，降低 mosaic 强度。
-    mosaic: 0.4
+    # Mosaic 概率；精调阶段关闭，避免破坏电路图结构。
+    mosaic: 0.0
     # 随机擦除；端口目标很小，关闭以避免误删目标。
     erasing: 0.0
-    # 训练最后若干 epoch 关闭 mosaic，学习真实图像分布。
-    close_mosaic: 10
+    # Mosaic 已关闭，此参数保留为 0。
+    close_mosaic: 0
     # 混合精度训练；节省显存并提升速度。
     amp: true
     # 使用预训练权重初始化。
@@ -142,11 +142,11 @@ eval_protocol:
   min_padded_iou: 0.01
   # 仅作为参考的严格 bbox IoU 阈值，不是主指标。
   baseline_iou: 0.50
-  # 是否保存 FP/FN diff 图片、GT label、预测 label。
+  # 是否生成 visualizations/ 可视化样本；兼容旧字段名 save_diff。
   save_diff: true
-  # true 时只保存存在真实 FP 的 diff，false 表示 FP/FN 都保存。
+  # 兼容旧 diff 配置；新 visualizations 流程暂不使用。
   save_fp_diff_only: false
-  # 与 save_fp_diff_only 配合，控制重复预测是否也保存为 diff。
+  # 兼容旧 diff 配置；新 visualizations 流程暂不使用。
   save_duplicate_fp_diff: false
 
 # 验收 profile；本配置只保留 full，且只评估 main_data。
@@ -164,8 +164,14 @@ acceptance_profiles:
     # 需要评估的数据集列表。
     eval_datasets:
       # 主数据配置，用于查看 train/val 上的拟合和泛化情况。
-      - name: merge_config_yolo26_0609
+      # - name: merge_config_yolo26_0609
+      #   # 数据集 data.yaml 路径。
+      #   data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/merge_config_yolo26_0609.yaml
+      #   # 对该 data.yaml 的哪些 split 做评估。
+      #   splits: [ val]
+      
+      - name: paper_benchmark_100
         # 数据集 data.yaml 路径。
-        data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/merge_config_yolo26_0609.yaml
+        data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/paper_benchmark_100/data.yaml
         # 对该 data.yaml 的哪些 split 做评估。
-        splits: [train, val]
+        splits: [val]

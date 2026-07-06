@@ -493,15 +493,26 @@ runs/
     │   └── review_result.csv
     │
     ├── visualizations/
-    │   ├── new_train/
-    │   │   ├── fp/
-    │   │   ├── fn/
-    │   │   ├── candidate_new_fp/
-    │   │   ├── candidate_new_fn/
-    │   │   └── candidate_improved/
-    │   ├── validation/
-    │   ├── benchmark/
-    │   └── hard_case_set/
+    │   ├── <dataset_name>/
+    │   │   ├── train/
+    │   │   │   ├── fp/
+    │   │   │   │   ├── images/
+    │   │   │   │   ├── labels_gt/
+    │   │   │   │   ├── labels_candidate/
+    │   │   │   │   ├── labels_champion/
+    │   │   │   │   └── compare/
+    │   │   │   ├── fn/
+    │   │   │   ├── candidate_new_fp/
+    │   │   │   ├── candidate_new_fn/
+    │   │   │   └── candidate_improved/
+    │   │   └── val/
+    │   │       ├── fp/
+    │   │       ├── fn/
+    │   │       ├── candidate_new_fp/
+    │   │       ├── candidate_new_fn/
+    │   │       └── candidate_improved/
+    │   ├── <benchmark_dataset>/
+    │   └── <hard_case_dataset>/
     │
     └── report/
         ├── report_original.html
@@ -518,43 +529,51 @@ runs/
 | `fn/` | Candidate 模型的漏检样本，包含可视化图、原图引用和标签引用 |
 | `candidate_new_fp/` | Champion 没有误检，但 Candidate 新增误检 |
 | `candidate_new_fn/` | Champion 检测正确，但 Candidate 漏检 |
-| `candidate_improved/` | Champion 错误、Candidate 改进的样本 |
+| `candidate_improved/` | 按整张图判断，Candidate 的 `FP + FN` 少于 Champion 的样本 |
+
+每个错误类型目录下统一保存：
+
+```Plain Text
+images/             # 原图
+labels_gt/          # GT 标签
+labels_candidate/   # Candidate 预测标签
+labels_champion/    # Champion 预测标签；未配置 Champion 时为空或不生成
+compare/            # 四栏对比图：原图 / GT / Champion / Candidate
+```
+
+说明：
+
+1. FP 和 FN 分开保存，不再合并到同一目录，便于后续分别做误检治理和漏检治理；
+2. 同一张图可能同时进入多个目录，例如既进入 `fp/`，也进入 `candidate_new_fp/`；
+3. `save_diff: true` 表示生成上述 `visualizations/`，不再生成旧版 `diff/` 目录；
+4. `save_diff: false` 表示只输出 `metrics/`、`cache/` 和 `manifests/`，不生成可视化样本。
 
 ### 9.2 FP/FN 可视化规范
 
-每张 FP/FN 图应包含：
+每张 FP/FN 对比图应包含四栏：
 
 ```Plain Text
-原始图像
-GT 标注框
-Champion 预测框
-Candidate 预测框
-预测类别
-预测置信度
-所属数据集
-错误类型
-dataset_version
-run_id
+原图 | GT 标注 | Champion 预测 | Candidate 预测
 ```
 
 颜色固定：
 
 ```Plain Text
 GT：绿色
-Champion：蓝色
-Candidate：红色
-FP 标记：黄色
+Champion：按匹配状态着色，不使用模型固定颜色
+Candidate：按匹配状态着色，不使用模型固定颜色
 FN 标记：红色
+FP 标记：黄色
+TP 标记：绿色
+预测文字：只显示置信度分数，不显示类别名或模型前缀
 ```
 
-图像顶部可显示：
+图像顶部可显示数据集、split 和错误类型：
 
 ```Plain Text
 [candidate_new_fp]
 dataset=benchmark
 dataset_version=dataset_v1
-candidate_class=MOS_A
-candidate_confidence=0.96
 champion_result=No FP
 candidate_result=FP
 ```
@@ -567,22 +586,17 @@ candidate_result=FP
 4. Champion 是否存在同样问题；
 5. 是否需要修正标签或补充样本。
 
-### 9.3 Candidate 与 Champion 对比图
+### 9.3 Candidate 与 Champion 对比口径
 
-对于 `candidate_new_fp`、`candidate_new_fn` 和 `candidate_improved`，建议生成三栏对比图：
+当同时配置 Candidate 和 Champion 时，系统基于逐图结果生成新旧模型差异目录：
 
-```Plain Text
-左图：GT
-中图：Champion 预测与错误标记
-右图：Candidate 预测与错误标记
-```
+| 目录 | 判定条件 |
+| --- | --- |
+| `candidate_new_fp/` | Candidate 的 FP 数量大于 0，且 Champion 的 FP 数量等于 0 |
+| `candidate_new_fn/` | Candidate 的 FN 数量大于 0，且 Champion 的 FN 数量等于 0 |
+| `candidate_improved/` | `candidate_fp + candidate_fn < champion_fp + champion_fn` |
 
-这样人工可直接判断：
-
-- 新模型是否真的优于旧模型；
-- 新模型的新增错误是否属于严重回归；
-- 新模型提升是否来自真正识别能力提升；
-- 新模型的高置信度预测是否揭示标注漏标。
+如果只配置 Candidate，不配置 Champion，则只生成 `fp/` 和 `fn/`。
 
 ## 10. 报告设计
 

@@ -82,7 +82,7 @@ runs/merge_config_yolo26_0609_acceptance_YYYYMMDD_HHMMSS/
 ```text
 runs/<run_id>/metrics/overall_summary.csv
 runs/<run_id>/metrics/*_per_image.csv
-runs/<run_id>/diff/
+runs/<run_id>/visualizations/
 runs/<run_id>/manifests/
 runs/<run_id>/logs/run.log
 ```
@@ -91,16 +91,18 @@ runs/<run_id>/logs/run.log
 
 - `overall_summary.csv` 是总体 TP/FP/FN、Precision、Recall、F1。
 - `*_per_image.csv` 是逐图结果。
-- `diff/` 保存 FP/FN 图片、GT label、预测 label，供人工检查。
+- `visualizations/` 按数据集和 split 保存 Candidate FP/FN、新增错误和改进样本。
 - `manifests/` 记录数据版本、hash 和数据泄漏检查结果。
 
 ### 3. 人工修标
 
-根据第 2 步的 `diff/` 结果，人工检查 FP/FN：
+根据第 2 步的 `visualizations/` 结果，人工检查 FP/FN：
 
 ```text
-runs/<run_id>/diff/candidate/merge_config_yolo26_0609/train/
-runs/<run_id>/diff/candidate/merge_config_yolo26_0609/val/
+runs/<run_id>/visualizations/merge_config_yolo26_0609/train/fp/
+runs/<run_id>/visualizations/merge_config_yolo26_0609/train/fn/
+runs/<run_id>/visualizations/merge_config_yolo26_0609/val/fp/
+runs/<run_id>/visualizations/merge_config_yolo26_0609/val/fn/
 ```
 
 确认是标签问题后，直接修正原始数据集里的 label 文件。

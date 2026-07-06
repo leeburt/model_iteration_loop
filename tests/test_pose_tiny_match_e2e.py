@@ -7,7 +7,16 @@ from pathlib import Path
 from PIL import Image
 
 from yolo_iter.manifest import build_dataset_manifest
-from yolo_iter.pose_tiny_match import TinyMatchConfig, evaluate_split
+from yolo_iter.pose_io import PoseItem
+from yolo_iter.pose_tiny_match import (
+    TinyMatchConfig,
+    build_visualization_plan,
+    classify_items_for_visualization,
+    evaluate_split,
+    generate_comparison_visualizations,
+    maybe_progress,
+    tiny_config_from_dict,
+)
 
 
 def write_label(path: Path, rows: list[str]) -> None:
@@ -16,6 +25,95 @@ def write_label(path: Path, rows: list[str]) -> None:
 
 
 class PoseTinyMatchE2ETest(unittest.TestCase):
+    def test_tiny_config_enables_progress_by_default_and_honors_override(self) -> None:
+        self.assertTrue(tiny_config_from_dict({}).show_progress)
+        self.assertFalse(tiny_config_from_dict({"show_progress": False}).show_progress)
+
+    def test_maybe_progress_wraps_iterable_when_enabled(self) -> None:
+        calls = []
+
+        def fake_tqdm(iterable, **kwargs):
+            calls.append(kwargs)
+            return iterable
+
+        values = list(
+            maybe_progress(
+                [1, 2, 3],
+                enabled=True,
+                desc="candidate tiny val match",
+                total=3,
+                tqdm_factory=fake_tqdm,
+            )
+        )
+
+        self.assertEqual(values, [1, 2, 3])
+        self.assertEqual(calls[0]["desc"], "candidate tiny val match")
+        self.assertEqual(calls[0]["total"], 3)
+
+    def test_build_visualization_plan_compares_candidate_and_champion(self) -> None:
+        candidate_rows = [
+            {"image": "/tmp/a.png", "fp": 1, "fn": 0},
+            {"image": "/tmp/b.png", "fp": 0, "fn": 1},
+            {"image": "/tmp/c.png", "fp": 0, "fn": 0},
+        ]
+        champion_rows = [
+            {"image": "/tmp/a.png", "fp": 0, "fn": 0},
+            {"image": "/tmp/b.png", "fp": 0, "fn": 0},
+            {"image": "/tmp/c.png", "fp": 1, "fn": 1},
+        ]
+
+        plan = build_visualization_plan(candidate_rows, champion_rows)
+
+        self.assertEqual(plan["/tmp/a.png"], {"fp", "candidate_new_fp"})
+        self.assertEqual(plan["/tmp/b.png"], {"fn", "candidate_new_fn"})
+        self.assertEqual(plan["/tmp/c.png"], {"candidate_improved"})
+
+    def test_classify_items_for_visualization_marks_tp_fp_and_fn(self) -> None:
+        gt_items = [
+            PoseItem(0, 10, 10, 20, 20, [(15, 15, 2)]),
+            PoseItem(0, 50, 50, 60, 60, [(55, 55, 2)]),
+        ]
+        pred_items = [
+            PoseItem(0, 10, 10, 20, 20, [(15, 15, 2)], conf=0.91),
+            PoseItem(0, 80, 80, 90, 90, [(85, 85, 2)], conf=0.72),
+        ]
+
+        classified = classify_items_for_visualization(gt_items, pred_items, TinyMatchConfig())
+
+        self.assertEqual(classified["tp_pred_indices"], {0})
+        self.assertEqual(classified["fp_pred_indices"], {1})
+        self.assertEqual(classified["fn_gt_indices"], {1})
+
+    def test_evaluate_split_reports_empty_split_before_prediction(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "images" / "train").mkdir(parents=True)
+            data_yaml = root / "data.yaml"
+            data_yaml.write_text(
+                "\n".join(
+                    [
+                        f"path: {root}",
+                        "train: images/train",
+                        "nc: 1",
+                        "kpt_shape: [1, 3]",
+                        "names:",
+                        "  0: in_line",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "No images found for dataset=tiny split=train"):
+                evaluate_split(
+                    data_path=data_yaml,
+                    dataset_name="tiny",
+                    split="train",
+                    output_dir=root / "runs",
+                    cfg=TinyMatchConfig(show_progress=False),
+                    pred_label_dirs=[root / "pred"],
+                    model_role="candidate",
+                )
+
     def test_manifest_eval_and_recheck(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -64,7 +162,7 @@ class PoseTinyMatchE2ETest(unittest.TestCase):
                 dataset_name="tiny",
                 split="val",
                 output_dir=out_dir,
-                cfg=TinyMatchConfig(save_diff=True),
+                cfg=TinyMatchConfig(save_diff=True, show_progress=False),
                 pred_label_dirs=[pred_dir],
                 model_role="candidate",
             )
@@ -74,7 +172,21 @@ class PoseTinyMatchE2ETest(unittest.TestCase):
             self.assertEqual(summary["totals"]["fn"], 1)
             self.assertAlmostEqual(summary["metrics"]["f1"], 0.5)
             self.assertTrue((out_dir / "metrics" / "candidate_tiny_val_summary.json").exists())
-            self.assertTrue((out_dir / "diff" / "candidate" / "tiny" / "val" / "images" / "fn.png").exists())
+            generate_comparison_visualizations(
+                output_dir=out_dir,
+                dataset_name="tiny",
+                split="val",
+                candidate_rows=result["rows"],
+            )
+            self.assertFalse((out_dir / "diff").exists())
+            self.assertTrue((out_dir / "visualizations" / "tiny" / "val" / "fp" / "images" / "fp.png").exists())
+            self.assertTrue((out_dir / "visualizations" / "tiny" / "val" / "fp" / "labels_gt" / "fp.txt").exists())
+            self.assertTrue((out_dir / "visualizations" / "tiny" / "val" / "fp" / "labels_candidate" / "fp.txt").exists())
+            self.assertTrue((out_dir / "visualizations" / "tiny" / "val" / "fp" / "compare" / "fp.png").exists())
+            self.assertTrue((out_dir / "visualizations" / "tiny" / "val" / "fn" / "images" / "fn.png").exists())
+            self.assertTrue((out_dir / "visualizations" / "tiny" / "val" / "fn" / "labels_gt" / "fn.txt").exists())
+            self.assertTrue((out_dir / "visualizations" / "tiny" / "val" / "fn" / "labels_candidate" / "fn.txt").exists())
+            self.assertTrue((out_dir / "visualizations" / "tiny" / "val" / "fn" / "compare" / "fn.png").exists())
 
             # Simulate label fix: remove the FN object and add an FP target at the predicted point.
             write_label(lbl_dir / "fn.txt", [])
@@ -85,7 +197,7 @@ class PoseTinyMatchE2ETest(unittest.TestCase):
                 dataset_name="tiny",
                 split="val",
                 output_dir=review_dir,
-                cfg=TinyMatchConfig(save_diff=True),
+                cfg=TinyMatchConfig(save_diff=True, show_progress=False),
                 pred_label_dirs=[pred_dir],
                 model_role="candidate",
             )
