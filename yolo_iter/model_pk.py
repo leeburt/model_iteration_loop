@@ -13,21 +13,13 @@ from typing import Any
 
 from .acceptance import default_candidate_from_train, make_run_dir, write_run_manifest
 from .config import load_yaml, model_pk_config_from_project
+from .detect_match import normalize_class_names
+from .evaluation import EvaluationBackend, backend_from_eval_protocol, backend_from_match_config
 from .logging_utils import add_file_handler
 from .manifest import build_dataset_manifest, write_json
 from .paths import collect_images, resolve_dataset_paths
-from .pose_io import image_size, read_pose_txt
-from .pose_tiny_match import (
-    TinyMatchConfig,
-    build_visualization_plan,
-    generate_comparison_visualizations,
-    maybe_progress,
-    precision_recall,
-    predict_to_labels,
-    save_visualization_sample,
-    tiny_config_from_dict,
-    tiny_match,
-)
+from .pose_io import image_size
+from .pose_tiny_match import maybe_progress, precision_recall
 
 
 def collect_split_image_label_pairs(data_path: Path, split: str, dataset_name: str) -> list[tuple[Path, Path]]:
@@ -56,14 +48,15 @@ def run_model_pk_from_prediction_dirs(
     output_dir: Path,
     candidate_pred_dir: Path,
     champion_pred_dir: Path,
-    cfg: TinyMatchConfig | None = None,
+    cfg: Any | None = None,
     save_visualizations: bool = True,
 ) -> dict[str, Any]:
     """使用已有预测标签执行 Model PK。
 
     Champion 预测作为 pseudo-GT，Candidate 预测作为待评估结果。
     """
-    cfg = cfg or TinyMatchConfig(show_progress=False)
+    backend = backend_from_match_config(cfg)
+    cfg = backend.cfg
     image_label_pairs = collect_split_image_label_pairs(Path(data_path), split, dataset_name)
     totals = {
         "images": 0,
@@ -84,9 +77,9 @@ def run_model_pk_from_prediction_dirs(
         w, h = image_size(img_path)
         champion_label = Path(champion_pred_dir) / f"{img_path.stem}.txt"
         candidate_label = Path(candidate_pred_dir) / f"{img_path.stem}.txt"
-        champion_items = read_pose_txt(champion_label, w, h, has_conf=True)
-        candidate_items = read_pose_txt(candidate_label, w, h, has_conf=True)
-        matches = tiny_match(champion_items, candidate_items, cfg)
+        champion_items = backend.read_txt(champion_label, w, h, True)
+        candidate_items = backend.read_txt(candidate_label, w, h, True)
+        matches = backend.match_items(champion_items, candidate_items, cfg)
         matched_champion = {m.gt_idx for m in matches}
         matched_candidate = {m.pred_idx for m in matches}
         fp = len(candidate_items) - len(matched_candidate)
@@ -105,6 +98,7 @@ def run_model_pk_from_prediction_dirs(
                 "dataset": dataset_name,
                 "split": split,
                 "image": str(img_path),
+                "data_path": str(data_path),
                 "gt_label": str(champion_label),
                 "human_gt_label": str(gt_label),
                 "pred_label": str(candidate_label),
@@ -125,6 +119,7 @@ def run_model_pk_from_prediction_dirs(
         "split": split,
         "mode": "model_pk",
         "gt_source": "champion_predictions",
+        "match": backend.match_summary(cfg),
         "totals": totals,
         "metrics": metrics,
     }
@@ -147,6 +142,7 @@ def run_model_pk_from_prediction_dirs(
             split=split,
             rows=rows,
             cfg=cfg,
+            backend=backend,
         )
     return {"summary": summary, "rows": rows}
 
@@ -157,21 +153,27 @@ def generate_model_pk_visualizations(
     dataset_name: str,
     split: str,
     rows: list[dict[str, Any]],
-    cfg: TinyMatchConfig,
+    cfg: Any,
+    backend: EvaluationBackend | None = None,
 ) -> None:
     """生成 Model PK 可视化，Champion 预测同时保存为 labels_gt 和 labels_champion。"""
-    plan = build_visualization_plan(rows, None)
+    backend = backend or backend_from_match_config(cfg)
+    plan = backend.build_visualization_plan(rows, None)
     rows_by_image = {str(row["image"]): row for row in rows}
+    class_names = None
+    if backend.task == "detect" and rows:
+        class_names = normalize_class_names(load_yaml(Path(str(rows[0]["data_path"]))).get("names"))
     for image, categories in plan.items():
         row = rows_by_image[image]
         img_path = Path(image)
         champion_label = Path(str(row["champion_pred_label"]))
         candidate_label = Path(str(row["pred_label"]))
         w, h = image_size(img_path)
-        champion_items = read_pose_txt(champion_label, w, h, has_conf=True)
-        candidate_items = read_pose_txt(candidate_label, w, h, has_conf=True)
+        champion_items = backend.read_txt(champion_label, w, h, True)
+        candidate_items = backend.read_txt(candidate_label, w, h, True)
         for category in categories:
-            save_visualization_sample(
+            visual_kwargs = {"class_names": class_names} if class_names is not None else {}
+            backend.save_visualization_sample(
                 output_dir=output_dir,
                 dataset_name=dataset_name,
                 split=split,
@@ -184,6 +186,7 @@ def generate_model_pk_visualizations(
                 champion_label=champion_label,
                 champion_items=None,
                 cfg=cfg,
+                **visual_kwargs,
             )
 
 
@@ -275,7 +278,8 @@ def run_model_pk(config_path: str | Path, profile: str = "default", logger=None)
     config["champion_model"] = str(champion_model.resolve())
     write_run_manifest(run_dir, cfg_path, config, manifests)
 
-    tiny_cfg = tiny_config_from_dict(config.get("eval", {}))
+    backend = backend_from_eval_protocol(config.get("eval", {}))
+    eval_cfg = backend.cfg
     results = []
     for ds in config.get("eval_datasets", []):
         dataset_name = ds["name"]
@@ -287,10 +291,10 @@ def run_model_pk(config_path: str | Path, profile: str = "default", logger=None)
             champion_pred_dir = run_dir / "cache" / "champion" / dataset_name / split / "_pred_labels"
             if logger:
                 logger.info("Predicting candidate dataset=%s split=%s", dataset_name, split)
-            predict_to_labels(candidate_model, images, candidate_pred_dir, tiny_cfg, progress_desc=f"candidate {dataset_name} {split} predict")
+            backend.predict_to_labels(candidate_model, images, candidate_pred_dir, eval_cfg, progress_desc=f"candidate {dataset_name} {split} predict")
             if logger:
                 logger.info("Predicting champion dataset=%s split=%s", dataset_name, split)
-            predict_to_labels(champion_model, images, champion_pred_dir, tiny_cfg, progress_desc=f"champion {dataset_name} {split} predict")
+            backend.predict_to_labels(champion_model, images, champion_pred_dir, eval_cfg, progress_desc=f"champion {dataset_name} {split} predict")
             if logger:
                 logger.info("Model PK evaluating dataset=%s split=%s", dataset_name, split)
             result = run_model_pk_from_prediction_dirs(
@@ -300,8 +304,8 @@ def run_model_pk(config_path: str | Path, profile: str = "default", logger=None)
                 output_dir=run_dir,
                 candidate_pred_dir=candidate_pred_dir,
                 champion_pred_dir=champion_pred_dir,
-                cfg=tiny_cfg,
-                save_visualizations=bool(tiny_cfg.save_diff),
+                cfg=eval_cfg,
+                save_visualizations=bool(eval_cfg.save_diff),
             )
             results.append(result)
             if logger:

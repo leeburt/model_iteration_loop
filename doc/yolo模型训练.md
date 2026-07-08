@@ -562,8 +562,8 @@ compare/            # 四栏对比图：原图 / GT / Champion / Candidate
 GT：绿色
 Champion：按匹配状态着色，不使用模型固定颜色
 Candidate：按匹配状态着色，不使用模型固定颜色
-FN 标记：红色
-FP 标记：黄色
+FN 标记：橙色
+FP 标记：橙色
 TP 标记：绿色
 预测文字：只显示置信度分数，不显示类别名或模型前缀
 ```

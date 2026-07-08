@@ -1,0 +1,73 @@
+# YOLO detect training and evaluation config.
+project:
+  name: detection
+  output_root: runs
+  python: /data1/libo/miniconda3/envs/yolo/bin/python
+
+models:
+  initial_weights: /data/liuyuhao/junction_detection/runs/all_junctions/junction_v16_v9_filtered/weights/best.pt
+  candidate_model: ""
+  champion_model: /data/liuyuhao/junction_detection/runs/all_junctions/junction_v16_v9_filtered/weights/best.pt
+
+datasets:
+  train_data: /data/liuyuhao/junction_detection/junction_v1/v9_xuxian_yinying/data.yaml
+
+train:
+  data: /data/liuyuhao/junction_detection/junction_v1/v9_xuxian_yinying/data.yaml
+  initial_weights: /data/liuyuhao/junction_detection/runs/all_junctions/junction_v16_v9_filtered/weights/best.pt
+  project: /data-ssd/libo/ultralytics/runs/detect/train_resule
+  name: junction_v17_xuxian_yinying
+  resume: auto
+  args:
+    task: detect
+    mode: train
+    epochs: 200
+    batch: 4
+    imgsz: 1280
+    patience: 15
+    device: "5"
+    workers: 8
+    val: true
+    optimizer: AdamW
+    lr0: 0.0001
+    lrf: 0.01
+    close_mosaic: 10
+    amp: true
+    plots: true
+    save: true
+    exist_ok: true
+    cache: true
+
+eval_protocol:
+  metric: bbox_iou_f1
+  task: detect
+  device: "5"
+  imgsz: 1280
+  batch: 4
+  conf: 0.25
+  nms_iou: 0.45
+  half: true
+  match_iou: 0.50
+  save_diff: true
+
+acceptance_profiles:
+  full:
+    run_id: detection_acceptance
+    output_root: runs
+    candidate_model: ""
+    champion_model: ""
+    eval_datasets:
+      - name: junction_v9_xuxian_yinying
+        data: /data/liuyuhao/junction_detection/junction_v1/v9_xuxian_yinying/data.yaml
+        splits: [val]
+
+model_pk_profiles:
+  default:
+    run_id: detection_model_pk
+    output_root: runs
+    candidate_model: ""
+    champion_model: ""
+    eval_datasets:
+      - name: junction_v9_xuxian_yinying
+        data: /data/liuyuhao/junction_detection/junction_v1/v9_xuxian_yinying/data.yaml
+        splits: [val]

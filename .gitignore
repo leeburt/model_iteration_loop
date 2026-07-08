@@ -1,4 +1,6 @@
 runs/
+.cache/
+train_result/
 __pycache__/
 *.pyc
 *.pyo

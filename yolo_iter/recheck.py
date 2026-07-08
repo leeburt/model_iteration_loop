@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from .config import acceptance_config_from_project, load_yaml
+from .evaluation import backend_from_eval_protocol
 from .manifest import build_dataset_manifest, write_json
 from .acceptance import resolve_model_paths, write_comparison_visualizations
-from .pose_tiny_match import evaluate_split, tiny_config_from_dict
 
 
 def find_pred_dir(run_dir: Path, model_role: str, dataset_name: str, split: str) -> Path:
@@ -57,7 +57,8 @@ def run_review_recheck(
         manifests.append(manifest)
         write_json(review_dir / "manifests" / f"dataset_manifest_{manifest['dataset_name']}.json", manifest)
 
-    tiny_cfg = tiny_config_from_dict(cfg.get("eval", {}))
+    backend = backend_from_eval_protocol(cfg.get("eval", {}))
+    eval_cfg = backend.cfg
     roles = list(resolve_model_paths(cfg).keys())
     if not roles:
         # Review can still re-evaluate existing candidate cache even if current config no longer carries model path.
@@ -75,12 +76,12 @@ def run_review_recheck(
                 pred_dir = find_pred_dir(run_path, role, dataset_name, split)
                 if logger:
                     logger.info("Rechecking role=%s dataset=%s split=%s", role, dataset_name, split)
-                result = evaluate_split(
+                result = backend.evaluate_split(
                     data_path=data_path,
                     dataset_name=dataset_name,
                     split=split,
                     output_dir=review_dir,
-                    cfg=tiny_cfg,
+                    cfg=eval_cfg,
                     pred_label_dirs=[pred_dir],
                     model_role=role,
                 )
@@ -109,7 +110,7 @@ def run_review_recheck(
                 "f1": metrics["f1"],
             }
         )
-    write_comparison_visualizations(review_dir, results, save_visualizations=bool(tiny_cfg.save_diff), cfg=tiny_cfg)
+    write_comparison_visualizations(review_dir, results, save_visualizations=bool(eval_cfg.save_diff), cfg=eval_cfg, backend=backend)
     write_json(review_dir / "metrics" / "overall_summary.json", rows)
     (review_dir / "metrics").mkdir(parents=True, exist_ok=True)
     with (review_dir / "metrics" / "overall_summary.csv").open("w", newline="", encoding="utf-8") as f:

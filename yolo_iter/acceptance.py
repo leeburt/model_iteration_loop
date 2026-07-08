@@ -17,9 +17,10 @@ from pathlib import Path
 from typing import Any
 
 from .config import acceptance_config_from_project, load_yaml
+from .evaluation import EvaluationBackend, backend_from_eval_protocol
 from .logging_utils import add_file_handler
 from .manifest import build_dataset_manifest, file_sha256, write_json
-from .pose_tiny_match import evaluate_split, generate_comparison_visualizations, tiny_config_from_dict
+from .pose_tiny_match import generate_comparison_visualizations as pose_generate_comparison_visualizations
 
 
 def timestamp_run_id(prefix: str) -> str:
@@ -165,10 +166,19 @@ def write_overall_summary(run_dir: Path, results: list[dict[str, Any]]) -> None:
             writer.writerow(row)
 
 
-def write_comparison_visualizations(run_dir: Path, results: list[dict[str, Any]], save_visualizations: bool, cfg=None) -> None:
+def write_comparison_visualizations(
+    run_dir: Path,
+    results: list[dict[str, Any]],
+    save_visualizations: bool,
+    cfg=None,
+    backend: EvaluationBackend | None = None,
+) -> None:
     """根据 candidate/champion 逐图结果生成 visualizations 目录。"""
     if not save_visualizations:
         return
+    generate_comparison_visualizations = (
+        backend.generate_comparison_visualizations if backend is not None else pose_generate_comparison_visualizations
+    )
     grouped: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = {}
     for item in results:
         summary = item["summary"]
@@ -222,7 +232,8 @@ def run_acceptance(config_path: str | Path, profile: str = "full", logger=None) 
 
     write_run_manifest(run_dir, cfg_path, config, manifests)
 
-    tiny_cfg = tiny_config_from_dict(config.get("eval", {}))
+    backend = backend_from_eval_protocol(config.get("eval", {}))
+    eval_cfg = backend.cfg
     roles = model_roles(config)
     results = []
     for role, model_path in roles:
@@ -232,12 +243,12 @@ def run_acceptance(config_path: str | Path, profile: str = "full", logger=None) 
             for split in ds.get("splits", ["val"]):
                 if logger:
                     logger.info("Evaluating role=%s dataset=%s split=%s", role, dataset_name, split)
-                result = evaluate_split(
+                result = backend.evaluate_split(
                     data_path=data_path,
                     dataset_name=dataset_name,
                     split=split,
                     output_dir=run_dir,
-                    cfg=tiny_cfg,
+                    cfg=eval_cfg,
                     model_path=model_path,
                     model_role=role,
                 )
@@ -245,6 +256,6 @@ def run_acceptance(config_path: str | Path, profile: str = "full", logger=None) 
                 if logger:
                     logger.info("Result %s/%s/%s: %s", role, dataset_name, split, result["summary"]["metrics"])
 
-    write_comparison_visualizations(run_dir, results, save_visualizations=bool(tiny_cfg.save_diff), cfg=tiny_cfg)
+    write_comparison_visualizations(run_dir, results, save_visualizations=bool(eval_cfg.save_diff), cfg=eval_cfg, backend=backend)
     write_overall_summary(run_dir, results)
     return run_dir

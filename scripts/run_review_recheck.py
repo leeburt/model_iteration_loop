@@ -21,7 +21,7 @@ from yolo_iter.recheck import run_review_recheck
 
 
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="Recompute metrics from cached YOLO pose predictions after label edits.")
+    ap = argparse.ArgumentParser(description="Recompute metrics from cached YOLO predictions after label edits.")
     ap.add_argument("--run", required=True, help="Original acceptance run directory")
     ap.add_argument("--config", default="configs/project.yaml")
     ap.add_argument("--profile", default="full", help="acceptance profile in the unified project config")

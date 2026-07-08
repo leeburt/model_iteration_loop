@@ -1,4 +1,4 @@
-"""YOLO pose 模型训练封装。
+"""YOLO 模型训练封装。
 
 支持从 YAML 配置驱动训练，自动处理：
 - 断点续训检测（resume: auto）
@@ -23,11 +23,12 @@ warnings.filterwarnings("ignore", ".*iCCP.*")
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-def get_resume_checkpoint(project_name: str, name: str) -> Path | None:
+def get_resume_checkpoint(project_name: str, name: str, task: str = "pose") -> Path | None:
     """查找可续训的 last.pt 检查点，找不到返回 None。"""
+    task = str(task or "pose")
     candidates = [
-        Path("runs") / "pose" / project_name / name / "weights" / "last.pt",
         Path(project_name) / name / "weights" / "last.pt",
+        Path("runs") / task / project_name / name / "weights" / "last.pt",
     ]
     for path in candidates:
         if path.exists():
@@ -55,7 +56,8 @@ def build_training_args(config: dict[str, Any]) -> tuple[YOLO, dict[str, Any], d
     args["name"] = name
 
     resume_mode = config.get("resume", "auto")
-    resume_checkpoint = get_resume_checkpoint(project, name) if resume_mode == "auto" else None
+    task = str(args.get("task") or "pose")
+    resume_checkpoint = get_resume_checkpoint(project, name, task=task) if resume_mode == "auto" else None
     if resume_checkpoint:
         model_path = resume_checkpoint
         args["resume"] = True
@@ -71,16 +73,17 @@ def build_training_args(config: dict[str, Any]) -> tuple[YOLO, dict[str, Any], d
         "model_path": str(model_path),
         "model_hash": file_sha256(model_path),
         "resume": bool(args.get("resume")),
+        "task": task,
         "cuda_device_count": torch.cuda.device_count(),
     }
     return model, args, metadata
 
 
-def train_pose(config: dict[str, Any], logger=None):
-    """执行 YOLO pose 训练，返回 (results, metadata)。"""
+def train_yolo(config: dict[str, Any], logger=None):
+    """执行 YOLO 训练，返回 (results, metadata)。"""
     model, args, metadata = build_training_args(config)
     if logger:
-        logger.info("Starting YOLO pose training")
+        logger.info("Starting YOLO %s training", metadata["task"])
         logger.info("Training metadata: %s", metadata)
         logger.info("Training args: %s", args)
     results = model.train(**args)
@@ -90,3 +93,8 @@ def train_pose(config: dict[str, Any], logger=None):
     if logger:
         logger.info("Training complete. save_dir=%s", save_dir)
     return results, metadata
+
+
+def train_pose(config: dict[str, Any], logger=None):
+    """Backward-compatible wrapper for older pose training scripts."""
+    return train_yolo(config, logger=logger)

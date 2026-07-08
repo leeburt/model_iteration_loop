@@ -15,6 +15,7 @@ from yolo_iter.pose_tiny_match import (
     evaluate_split,
     generate_comparison_visualizations,
     maybe_progress,
+    render_prediction_panel,
     tiny_config_from_dict,
 )
 
@@ -83,6 +84,24 @@ class PoseTinyMatchE2ETest(unittest.TestCase):
         self.assertEqual(classified["tp_pred_indices"], {0})
         self.assertEqual(classified["fp_pred_indices"], {1})
         self.assertEqual(classified["fn_gt_indices"], {1})
+
+    def test_pose_fn_visualization_uses_orange(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_path = root / "source.png"
+            Image.new("RGB", (100, 100), "white").save(img_path)
+
+            panel = render_prediction_panel(
+                img_path,
+                "candidate",
+                gt_items=[PoseItem(0, 20, 20, 40, 40, [(30, 30, 2)])],
+                pred_items=[],
+                cfg=TinyMatchConfig(show_progress=False),
+            )
+
+            self.assertEqual(panel.getpixel((16, 50)), (255, 165, 0))
+            self.assertNotEqual(panel.getpixel((16, 50)), (255, 0, 0))
+            self.assertNotEqual(panel.getpixel((16, 50)), (255, 255, 0))
 
     def test_evaluate_split_reports_empty_split_before_prediction(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -20,7 +20,7 @@ from yolo_iter.logging_utils import setup_logger
 
 
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="Run YOLO pose acceptance evaluation.")
+    ap = argparse.ArgumentParser(description="Run YOLO acceptance evaluation.")
     ap.add_argument("--config", default="configs/project.yaml")
     ap.add_argument("--profile", default="full", help="acceptance profile in the unified project config")
     return ap.parse_args()
