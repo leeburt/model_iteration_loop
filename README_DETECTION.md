@@ -179,7 +179,25 @@ runs/<predict_run>/*.jpg
 
 ### 2.2 模型 PK
 
-模型 PK 用于对比 Candidate 和 Champion，不读取人工 GT 作为评价基准，而是把 `champion_model` 的预测当作 pseudo-GT，统计 Candidate 相对 Champion 的 FP/FN。
+模型 PK 用于对比 Candidate 和 Champion，不读取人工 GT 作为评价基准，而是把 `champion_model` 的预测当作 pseudo-GT，统计 Candidate 相对 Champion 的 FP/FN。推荐把 PK 用在单张图片或图片目录上，快速确认两个模型在指定样本上的差异；整套数据集验收使用 `acceptance_profiles`。
+
+`model_pk_profiles` 里推荐使用 `images` 指定单张图片或一级图片目录：
+
+```yaml
+model_pk_profiles:
+  default:
+    run_id: detection_model_pk
+    output_root: runs
+    candidate_model: ""
+    champion_model: ""
+    eval_datasets:
+      - name: junction_debug
+        images: /path/to/image_or_images_dir
+        names:
+          0: junction
+```
+
+`names` 可选；不配置时会读取 `candidate_model` 和 `champion_model` 的 YOLO `names`，按类别名把两个模型的预测映射到同一个类别空间后再判断是否匹配。这样两个模型类别 id 顺序不同，但类别名相同时仍会算作同类；类别名不同则不匹配。兼容旧用法：也可以继续使用 `data: /path/to/data.yaml` 和 `splits: [val]`，但这更接近完整验收场景。
 
 ```bash
 /data1/libo/miniconda3/envs/yolo/bin/python scripts/run_model_pk.py \
@@ -203,12 +221,12 @@ runs/junction_v17_detection_model_pk_YYYYMMDD_HHMMSS/
 
 ```text
 runs/<run_id>/metrics/overall_summary.csv
-runs/<run_id>/metrics/model_pk_<dataset>_<split>_summary.json
-runs/<run_id>/metrics/model_pk_<dataset>_<split>_per_image.csv
-runs/<run_id>/visualizations/<dataset>/<split>/fp/
-runs/<run_id>/visualizations/<dataset>/<split>/fn/
-runs/<run_id>/cache/candidate/<dataset>/<split>/_pred_labels/
-runs/<run_id>/cache/champion/<dataset>/<split>/_pred_labels/
+runs/<run_id>/metrics/model_pk_<name>_images_summary.json
+runs/<run_id>/metrics/model_pk_<name>_images_per_image.csv
+runs/<run_id>/visualizations/<name>/images/fp/
+runs/<run_id>/visualizations/<name>/images/fn/
+runs/<run_id>/cache/candidate/<name>/images/_pred_labels/
+runs/<run_id>/cache/champion/<name>/images/_pred_labels/
 ```
 
 本轮 PK 结果：

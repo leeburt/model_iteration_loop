@@ -68,6 +68,5 @@ model_pk_profiles:
     candidate_model: ""
     champion_model: ""
     eval_datasets:
-      - name: junction_v9_xuxian_yinying
-        data: /data/liuyuhao/junction_detection/junction_v1/v9_xuxian_yinying/data.yaml
-        splits: [val]
+      - name: junction_v9_xuxian_yinying_images
+        images: /data/liuyuhao/junction_detection/junction_v1/v9_xuxian_yinying/val/images

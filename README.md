@@ -161,7 +161,7 @@ runs/<predict_run>/logs/run.log
 
 ### 2.2 模型 PK
 
-模型 PK 用于批量对比两个模型，不读取人工 GT 作为评价基准，而是把 `champion_model` 的预测当作 pseudo-GT，统计 `candidate_model` 相对 Champion 的 FP/FN。
+模型 PK 用于在指定图片或图片目录上对比两个模型，不读取人工 GT 作为评价基准，而是把 `champion_model` 的预测当作 pseudo-GT，统计 `candidate_model` 相对 Champion 的 FP/FN。完整数据集验收优先使用 `acceptance_profiles`。
 
 ```bash
 /data1/libo/miniconda3/envs/yolo/bin/python scripts/run_model_pk.py \
@@ -179,16 +179,19 @@ model_pk_profiles:
     candidate_model: ""
     champion_model: ""
     eval_datasets:
-      - name: paper_benchmark_100
-        data: /data-ssd/libo/p100/yolo_utils/dataset/external_inline/paper_benchmark_100/data.yaml
-        splits: [val]
+      - name: debug_images
+        images: /path/to/image_or_images_dir
+        names:
+          0: in_line
 ```
 
 字段含义：
 
 - `candidate_model` 为空时，自动使用 `train.project/train.name/weights/best.pt`。
 - `champion_model` 为空时，继承顶层 `models.champion_model`；模型 PK 必须有 Champion。
-- `eval_datasets` 可以配置多个数据集；每个数据集可以配置多个 split。
+- `eval_datasets[].images` 支持单张图片或一级图片目录，默认 split 名为 `images`。
+- `eval_datasets[].names` 可选；不配置时会读取 `candidate_model` 和 `champion_model` 的 YOLO `names`，按类别名判断两个模型预测是否属于同一类。
+- 兼容旧用法：`eval_datasets[].data` 可以继续指定 YOLO dataset yaml，并配合 `splits` 使用。
 
 输出目录类似：
 
@@ -200,12 +203,12 @@ runs/merge_config_yolo26_0609_model_pk_YYYYMMDD_HHMMSS/
 
 ```text
 runs/<run_id>/metrics/overall_summary.csv
-runs/<run_id>/metrics/model_pk_<dataset>_<split>_summary.json
-runs/<run_id>/metrics/model_pk_<dataset>_<split>_per_image.csv
-runs/<run_id>/visualizations/<dataset>/<split>/fp/
-runs/<run_id>/visualizations/<dataset>/<split>/fn/
-runs/<run_id>/cache/candidate/<dataset>/<split>/_pred_labels/
-runs/<run_id>/cache/champion/<dataset>/<split>/_pred_labels/
+runs/<run_id>/metrics/model_pk_<name>_images_summary.json
+runs/<run_id>/metrics/model_pk_<name>_images_per_image.csv
+runs/<run_id>/visualizations/<name>/images/fp/
+runs/<run_id>/visualizations/<name>/images/fn/
+runs/<run_id>/cache/candidate/<name>/images/_pred_labels/
+runs/<run_id>/cache/champion/<name>/images/_pred_labels/
 ```
 
 指标解释：
