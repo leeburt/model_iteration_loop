@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from yolo_iter.config import load_yaml, train_config_from_project
 from yolo_iter.logging_utils import setup_logger
 from yolo_iter.manifest import build_dataset_manifest, write_json
 from yolo_iter.training import build_training_args, train_yolo
@@ -26,6 +27,7 @@ DEFAULT_NAME = "junction_v17_xuxian_yinying"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train YOLO detect model.")
+    parser.add_argument("--config", default=None, help="Project YAML config; uses its train section when provided.")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Initial detect weights used when no last.pt is found.")
     parser.add_argument("--data", default=DEFAULT_DATA, help="YOLO detect data.yaml path.")
     parser.add_argument("--project", default=DEFAULT_PROJECT, help="Ultralytics project output directory.")
@@ -57,8 +59,49 @@ def resume_value(raw: str) -> str | bool:
     return "auto"
 
 
+def merge_train_overrides(config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Apply explicit CLI train overrides on top of YAML config."""
+    merged = dict(config)
+    train_args = dict(merged.get("args") or {})
+    merged["args"] = train_args
+    if args.model != DEFAULT_MODEL:
+        merged["initial_weights"] = str(Path(args.model).expanduser())
+    if args.data != DEFAULT_DATA:
+        merged["data"] = str(Path(args.data).expanduser())
+    if args.project != DEFAULT_PROJECT:
+        merged["project"] = str(Path(args.project).expanduser())
+    if args.name != DEFAULT_NAME:
+        merged["name"] = args.name
+    if args.resume != "auto":
+        merged["resume"] = resume_value(args.resume)
+
+    overrides = {
+        "epochs": args.epochs if args.epochs != 20 else None,
+        "imgsz": args.imgsz if args.imgsz != 1280 else None,
+        "batch": args.batch if args.batch != 4 else None,
+        "device": str(args.device) if str(args.device) != "5" else None,
+        "workers": args.workers if args.workers != 8 else None,
+        "patience": args.patience if args.patience != 15 else None,
+        "optimizer": args.optimizer if args.optimizer != "AdamW" else None,
+        "lr0": args.lr0 if args.lr0 != 1e-4 else None,
+        "lrf": args.lrf if args.lrf != 0.01 else None,
+        "close_mosaic": args.close_mosaic if args.close_mosaic != 10 else None,
+    }
+    for key, value in overrides.items():
+        if value is not None:
+            train_args[key] = value
+    if args.no_amp:
+        train_args["amp"] = False
+    if args.no_cache:
+        train_args["cache"] = False
+    return merged
+
+
 def build_config(args: argparse.Namespace) -> dict[str, Any]:
     """Build the train config consumed by yolo_iter.training."""
+    if args.config:
+        config = train_config_from_project(load_yaml(args.config))
+        return merge_train_overrides(config, args)
     return {
         "data": str(Path(args.data).expanduser()),
         "initial_weights": str(Path(args.model).expanduser()),
