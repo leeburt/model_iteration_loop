@@ -103,6 +103,24 @@ class PoseTinyMatchE2ETest(unittest.TestCase):
             self.assertNotEqual(panel.getpixel((16, 50)), (255, 0, 0))
             self.assertNotEqual(panel.getpixel((16, 50)), (255, 255, 0))
 
+    def test_pose_fp_visualization_uses_red(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_path = root / "source.png"
+            Image.new("RGB", (100, 100), "white").save(img_path)
+
+            panel = render_prediction_panel(
+                img_path,
+                "candidate",
+                gt_items=[],
+                pred_items=[PoseItem(0, 20, 20, 40, 40, [(30, 30, 2)], conf=0.8)],
+                cfg=TinyMatchConfig(show_progress=False),
+            )
+
+            self.assertEqual(panel.getpixel((18, 54)), (255, 0, 0))
+            self.assertNotEqual(panel.getpixel((18, 54)), (255, 165, 0))
+            self.assertNotEqual(panel.getpixel((18, 54)), (255, 255, 0))
+
     def test_evaluate_split_reports_empty_split_before_prediction(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

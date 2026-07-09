@@ -287,14 +287,14 @@ def render_prediction_panel(
     cfg: DetectMatchConfig,
     class_names: dict[int, str] | None = None,
 ) -> Image.Image:
-    """Render predictions with TP green and FP/FN orange."""
+    """Render predictions with TP green, FP red, and FN orange."""
     img = Image.open(img_path).convert("RGB")
     draw = ImageDraw.Draw(img)
     classified = classify_items_for_visualization(gt_items, pred_items, cfg)
     for idx in classified["tp_pred_indices"]:
         draw_prediction_item(draw, pred_items[idx], "lime", class_names)
     for idx in classified["fp_pred_indices"]:
-        draw_prediction_item(draw, pred_items[idx], "orange", class_names)
+        draw_prediction_item(draw, pred_items[idx], "red", class_names)
     for idx in classified["fn_gt_indices"]:
         draw_box(draw, gt_items[idx], "orange", width=4, pad=4)
         draw.text(

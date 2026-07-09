@@ -251,7 +251,8 @@ f1_vs_champion=0.9773655971
 验收和模型 PK 的 compare 图使用同一套颜色：
 
 - 绿色：TP，成功匹配。
-- 橙色：FP/FN，Candidate 多预测、未匹配预测，或 GT/Champion 有目标但 Candidate 没匹配上。
+- 红色：FP，Candidate 多预测或未匹配预测。
+- 橙色：FN，GT/Champion 有目标但 Candidate 没匹配上。
 - 检测 compare 图标签：gt 面板只显示类别；champion/candidate 面板显示类别和置信度分数。
 
 模型 PK 里的 `gt` 面板不是人工 GT，而是 Champion 预测生成的 pseudo-GT。

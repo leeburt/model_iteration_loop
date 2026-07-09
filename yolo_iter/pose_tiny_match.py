@@ -396,14 +396,14 @@ def render_prediction_panel(
     pred_items: list[PoseItem],
     cfg: TinyMatchConfig,
 ) -> Image.Image:
-    """渲染模型预测栏：TP 绿、FP/FN 橙。"""
+    """渲染模型预测栏：TP 绿、FP 红、FN 橙。"""
     img = Image.open(img_path).convert("RGB")
     draw = ImageDraw.Draw(img)
     classified = classify_items_for_visualization(gt_items, pred_items, cfg)
     for idx in classified["tp_pred_indices"]:
         draw_prediction_item(draw, pred_items[idx], "lime")
     for idx in classified["fp_pred_indices"]:
-        draw_prediction_item(draw, pred_items[idx], "orange")
+        draw_prediction_item(draw, pred_items[idx], "red")
     for idx in classified["fn_gt_indices"]:
         draw_box(draw, gt_items[idx], "orange", width=4, pad=4)
         draw_keypoint(draw, gt_items[idx], "orange", radius=6)

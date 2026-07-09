@@ -106,7 +106,7 @@ class DetectMatchTest(unittest.TestCase):
             self.assertTrue((out_dir / "visualizations" / "detect" / "val" / "fn" / "images" / "fn.png").exists())
             self.assertTrue((out_dir / "visualizations" / "detect" / "val" / "fp" / "compare" / "fp.png").exists())
 
-    def test_fp_visualization_uses_orange(self) -> None:
+    def test_fp_visualization_uses_red(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             img_path = root / "source.png"
@@ -120,7 +120,8 @@ class DetectMatchTest(unittest.TestCase):
                 cfg=DetectMatchConfig(show_progress=False),
             )
 
-            self.assertEqual(panel.getpixel((18, 54)), (255, 165, 0))
+            self.assertEqual(panel.getpixel((18, 54)), (255, 0, 0))
+            self.assertNotEqual(panel.getpixel((18, 54)), (255, 165, 0))
             self.assertNotEqual(panel.getpixel((18, 54)), (255, 255, 0))
 
     def test_fn_visualization_uses_orange(self) -> None:
